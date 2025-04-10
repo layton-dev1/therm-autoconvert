@@ -1,7 +1,8 @@
 from dxf_reader import reader
-from utils import material_loader, utils
+from utils import material_loader
 from xml_writer import writer
 from config import config
+from polygon_parser import parser
 
 def main():
     # Path to your DXF file
@@ -21,7 +22,7 @@ def main():
         polygons = reader.read_dxf(input_dxf_file)
 
         #This adds vertices necessary to properly define boundary conditions
-        polygons = utils.add_vertices_to_edges(polygons)
+        parser.prepare(polygons)
         materials = material_loader.from_csv(csv_file_path)
 
         writer.create_xml(polygons, materials, output_xml_file)
