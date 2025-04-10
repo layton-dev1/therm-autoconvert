@@ -1,0 +1,4 @@
+ezdxf
+matplotlib
+numpy
+pyodbc
