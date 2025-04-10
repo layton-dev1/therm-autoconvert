@@ -1,16 +1,18 @@
 import ezdxf
+from config import settings
 
 def read_dxf(file_path):
     doc = ezdxf.readfile(file_path)
-    return extract_polygons(doc)
+    msp = doc.modelspace()
+    
+    set_units(msp)
+    polygons = extract_polygons(msp)
+    
+    return polygons
 
-def extract_polygons(doc):
-    polygons = []
+def set_units(msp):
     min_x, min_y = float('inf'), float('inf')
     max_x, max_y = float('-inf'), float('-inf')
-
-    # Iterate over all entities in the modelspace
-    msp = doc.modelspace()
 
     #Determine drawings units
     for entity in msp:
@@ -22,16 +24,19 @@ def extract_polygons(doc):
                 min_y = min(min_y, y)
                 max_x = max(max_x, x)
                 max_y = max(max_y, y)
-    if(abs(max_x)-abs(min_x) > 15 or abs(max_y)-abs(min_y)):
-        SCALE_FACTOR = 25.4
+    if(abs(max_x)-abs(min_x) > 15 or abs(max_y)-abs(min_y) > 15):
+        settings.scale_factor = 1
     else:
-        SCALE_FACTOR = 1
+        settings.scale_factor = 25.4
+        print(f"Detecing imperial units, converting to metric")
 
+def extract_polygons(msp):
+    polygons = []
 
     for entity in msp:
         if entity.dxftype() == 'POLYLINE':
             try:
-                entity.scale(SCALE_FACTOR,SCALE_FACTOR,1)
+                entity.scale(settings.scale_factor, settings.scale_factor,1)
             except AttributeError:
                 print(f"Entity {entity.dxftype()} does not support scaling and was skipped.")
 

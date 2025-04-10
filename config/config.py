@@ -1,4 +1,7 @@
 import yaml
 
 with open("config/config.yaml", "r") as file:
-    settings = yaml.safe_load(file)
+    config = yaml.safe_load(file)
+    
+data = config["data"]
+units = config["units"]

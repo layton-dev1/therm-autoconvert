@@ -9,4 +9,5 @@ data:
   output_file_path: "lib/output/"
   input_file_path: "lib/dxfs/"
   dxfs:
-    - "Jamb"
+    - "Jamb_IMP"
+    - "Jamb_SI"

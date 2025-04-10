@@ -5,15 +5,17 @@ from config import config
 
 def main():
     # Path to your DXF file
-    data = config.settings["data"]
+    data = config.data
     input_file_path = data["input_file_path"]
     output_file_path = data["output_file_path"]
-    files = data["dxfs"]
     csv_file_path = data["materials_csv"]
+    files = data["dxfs"]
 
     for file_name in files:
+        print(f"DXF file '{file_name}' is being processed")
+    
         input_dxf_file = input_file_path + file_name + ".dxf"
-        output_xml_file = output_file_path + f"{file_name}.thmx"
+        output_xml_file = output_file_path + file_name + ".thmx"
 
         #Read and extract the drawing details
         polygons = reader.read_dxf(input_dxf_file)

@@ -2,7 +2,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from utils import utils
 import pyodbc
-from config import config
+from config import settings
 
 def create_xml(polygons, materials, output_file):
     # Create the root element
@@ -456,7 +456,7 @@ def insert_glass_polygon(cursor, gap_child_ids, glass_count, materials_element, 
     glass_row = cursor.fetchone()
     
     glass_id, thickness = glass_row
-    thickness = thickness*config["units"]["scale_factor"]
+    thickness = thickness*settings.scale_factor
     print(origin)
 
     # Step 5: Define the polygon (rectangle) based on the thickness
@@ -466,7 +466,7 @@ def insert_glass_polygon(cursor, gap_child_ids, glass_count, materials_element, 
 
     polygon = []
     for point in box_polygon:
-        polygon.append((point[0] + gap_child_ids[glass_count][0]*config["units"]["scale_factor"], point[1]))
+        polygon.append((point[0] + gap_child_ids[glass_count][0]*settings.scale_factor, point[1]))
 
     origin = polygon[-3]
 
