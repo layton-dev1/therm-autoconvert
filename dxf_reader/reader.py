@@ -2,15 +2,20 @@ import ezdxf
 from config import settings
 
 def read_dxf(file_path):
+    #Open the dxf file in ezdxf and create a modelspace
     doc = ezdxf.readfile(file_path)
     msp = doc.modelspace()
     
+    #Make sure drawing units are always in metric
     set_units(msp)
     polygons = extract_polygons(msp)
     
     return polygons
 
 def set_units(msp):
+    '''
+    Finds the min and max x and y points to determine how large the model is. Anything above 15" is probably in Metric
+    '''
     min_x, min_y = float('inf'), float('inf')
     max_x, max_y = float('-inf'), float('-inf')
 
@@ -31,15 +36,21 @@ def set_units(msp):
         print(f"Detecing imperial units, converting to metric")
 
 def extract_polygons(msp):
+    '''
+    Loop through all entities in drawing and scale them appropriately
+    '''
     polygons = []
 
     for entity in msp:
+        #Only interested in polylines
         if entity.dxftype() == 'POLYLINE':
             try:
                 entity.scale(settings.scale_factor, settings.scale_factor,1)
             except AttributeError:
+                #Should probably just remove it
                 print(f"Entity {entity.dxftype()} does not support scaling and was skipped.")
 
+            #Might want to change this later to store as shapely polygons directly (instead of list of vertices)
             vertices = [(vertex.dxf.location[0], vertex.dxf.location[1]) for vertex in entity.vertices]
             layer_name = entity.dxf.layer
             polygons.append((vertices, layer_name))
