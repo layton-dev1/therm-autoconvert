@@ -2,7 +2,9 @@ import pyodbc
 from config import settings
 import xml.etree.ElementTree as ET
 
-def import_glass_from_mdb_to_xml(root, polygons_element, mdb_file_location, mdb_glzsys_id, materials_element):
+def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
+    mdb_file_location = r"C:\Users\tyler.henderson\Documents\DXFtoTHERM\therm-autoconvert\lib\data\therm-autoconvert - DB.mdb"
+    mdb_glzsys_id = 2
     # Step 1: Open the MDB file and access the "GlzSys" table to find the "GlzSys" ID.
     conn_str = r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + mdb_file_location
     conn = pyodbc.connect(conn_str)

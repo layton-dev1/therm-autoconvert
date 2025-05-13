@@ -1,5 +1,4 @@
 from dxf_reader import reader
-from utils import material_loader
 from xml_writer import writer
 from config import config
 from polygon_parser import parser
@@ -9,7 +8,6 @@ def main():
     data = config.data
     input_file_path = data["input_file_path"]
     output_file_path = data["output_file_path"]
-    csv_file_path = data["materials_csv"]
     files = data["dxfs"]
 
     for file_name in files:
@@ -23,9 +21,8 @@ def main():
 
         #This adds vertices necessary to properly define boundary conditions
         parser.prepare(polygons)
-        materials = material_loader.from_csv(csv_file_path)
 
-        writer.create_xml(polygons, materials, output_xml_file)
+        writer.create_xml(polygons, output_xml_file)
         print(f"XML file '{output_xml_file}' has been created successfully.")
         
 if __name__ == "__main__":
