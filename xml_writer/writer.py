@@ -1,11 +1,28 @@
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from utils import utils
-import pyodbc
-from config import settings
+from xml_writer import igu_importer
 
-def create_xml(polygons, materials, output_file):
+def create_xml(polygons, output_file):
     # Create the root element
+    root = create_headings()
+    materials_element = ET.SubElement(root, "Materials")
+    boundaryconditions_element = ET.SubElement(root, "BoundaryConditions")
+    polygons_element = ET.SubElement(root, "Polygons")
+    boundaries_element = ET.SubElement(root, "Boundaries")
+    
+    # Create polygon, igu, and boundary elements
+    polygon_xml_section(root, polygons, materials_element, polygons_element)
+
+    glass_left, glass_right = igu_importer.import_glass_from_mdb_to_xml(root, polygons_element, materials_element)
+    
+    boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, glass_left, glass_right)
+
+    # Write the XML to a file
+    tree = ET.ElementTree(root)
+    tree.write(output_file, encoding="utf-8", xml_declaration=True)
+
+def create_headings():
     root = ET.Element("THERM-XML", xmlns="http://windows.lbl.gov")
     
     # Add metadata elements
@@ -21,7 +38,7 @@ def create_xml(polygons, materials, output_file):
     ET.SubElement(root, "Units").text = "SI"
     
     # Add MeshControl element
-    mesh_control = ET.SubElement(root, "MeshControl", MeshLevel="9", ErrorCheckFlag="1", ErrorLimit="10.000000", MaxIterations="5", CMAflag="0")
+    ET.SubElement(root, "MeshControl", MeshLevel="9", ErrorCheckFlag="1", ErrorLimit="10.000000", MaxIterations="5", CMAflag="0")
     
     # Add RadianceModeBC element
     radiance_mode_bc = ET.SubElement(root, "RadianceModeBC")
@@ -29,35 +46,96 @@ def create_xml(polygons, materials, output_file):
     ET.SubElement(radiance_mode_bc, "RadianceModeInBCTag").text = "ShadeInETag"
     ET.SubElement(radiance_mode_bc, "RadianceModeOutBCName").text = "ShadeOutE"
     ET.SubElement(radiance_mode_bc, "RadianceModeOutBCTag").text = "ShadeOutETag"
-
-    materials_element = ET.SubElement(root, "Materials")
-    boundaryconditions_element = ET.SubElement(root, "BoundaryConditions")
-    polygons_element = ET.SubElement(root, "Polygons")
-    boundaries_element = ET.SubElement(root, "Boundaries")
     
-    root, bc_id = polygon_xml_section(root, polygons, materials, materials_element, polygons_element)
+    return root
     
-    mdb_file_location = r"C:\Users\tyler.henderson\Documents\DXFtoTHERM\Glazing\DB.mdb"
-    mdb_glzsys_name = "G1"
-
-    #root = import_glass_from_mdb_to_xml(root, polygons_element, mdb_file_location, mdb_glzsys_name, materials_element)
+def create_material(materials_element, material, is_cavity=False):
+    if(len(materials_element) > 0):
+        last_id = int(materials_element[-1].attrib.get("Index"))
+    else:
+        last_id = 1
     
-    root = boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, bc_id + 1)
+    if(is_cavity):
+        # Create frame material element
+        material_element = ET.SubElement(
+            materials_element,
+            "Material",
+            Name=material['Name'],
+            Index=str(last_id+1),
+            Type=material['Type'],
+            Conductivity=material['Conductivity'],
+            Tir="1.000000",
+            EmissivityFront=material['Emissivity'],
+            EmissivityBack=material['Emissivity'],
+            RGBColor=material['Color'],
+            CavityModel=material['CavityModel']
+        ) 
+    else:
+        # Create material element
+        material_element = ET.SubElement(
+            materials_element,
+            "Material",
+            Name=material['Name'],
+            Index=str(last_id + 1),
+            Type=material['Type'],
+            Conductivity=material['Conductivity'],
+            Tir="0.000000",
+            EmissivityFront=material['Emissivity'],
+            EmissivityBack=material['Emissivity'],
+            RGBColor=material['Color']
+        ) 
+        
+        # Material elements need property subelements for Front and Back sides
+        for side in ["Front", "Back"]:
+            for range_type in ["Visible", "Solar"]:
+                for specularity in ["Direct", "Diffuse"]:
+                    ET.SubElement(
+                        material_element,
+                        "Property",
+                        Side=side,
+                        Range=range_type,
+                        Specularity=specularity,
+                        T="0.000000",
+                        R="0.000000"
+                    )
+    
+    return material_element   
 
-    # Write the XML to a file
-    tree = ET.ElementTree(root)
-    tree.write(output_file, encoding="utf-8", xml_declaration=True)
+def create_polygon_element(polygons_element, material, polygon):
+    if(len(polygons_element) > 0):
+        last_id = int(polygons_element[-1].attrib.get("ID"))
+    else:
+        last_id = 1
+        
+    # Add the polygon
+    polygon_element = ET.SubElement(
+        polygons_element,
+        "Polygon",
+        ID=str(last_id + 1),
+        Material=material['Name'],
+        NSides=str(len(polygon)),
+        Type="1",
+        units="mm"
+    )
+    
+    # Add each point to the polygon
+    for j, (x, y) in enumerate(polygon):
+        ET.SubElement(
+            polygon_element,
+            "Point",
+            index=str(j),
+            x=f"{x:.6f}",
+            y=f"{y:.6f}"
+        )
 
-def polygon_xml_section(root, polygons, materials, materials_element, polygons_element):
-    unique_materials = {}
-    material_index = 1
-    bc_id = 0
+def polygon_xml_section(root, polygons, materials_element, polygons_element):
+    unique_materials = []
     cavity_count = 2
 
     for i, (polygon, layer_name) in enumerate(polygons):
         # Find the closest matching material for the layer name
         if "frame" in layer_name.lower().strip() and "cavity" in layer_name.lower().strip():
-            #Define the material
+            #Define the frame cavity material
             material = {
                 'Name': f"Frame Cavity NFRC 100" + "_Cavity_" + str(cavity_count),
                 'Conductivity': "-1",
@@ -68,107 +146,36 @@ def polygon_xml_section(root, polygons, materials, materials_element, polygons_e
             }
 
             #Create material Element
-            material_element = ET.SubElement(
-                    materials_element,
-                    "Material",
-                    Name=material['Name'],
-                    Index=str(material_index),
-                    Type=material['Type'],
-                    Conductivity=material['Conductivity'],
-                    Tir="1.000000",
-                    EmissivityFront=material['Emissivity'],
-                    EmissivityBack=material['Emissivity'],
-                    RGBColor=material['Color'],
-                    CavityModel=material['CavityModel']
-                )
+            create_material(materials_element, material, is_cavity=True)
             cavity_count = cavity_count + 1
         else:
             #Define the material
-            material = utils.find_closest_material(layer_name, materials)
+            material = utils.find_closest_material(layer_name)
 
             #If none found add in placeholder
             if not material:
                     print(f"Warning: No matching material found for layer '{layer_name}'. Using default values.")
                     material = {
-                        'Name': f"{layer_name}, Appendix A",
+                        'Name': f"{layer_name}",
                         'Conductivity': "0.170000",
                         'Emissivity': "0.900000",
                         'Color': "0x000000",
                         'Type': "0"
                     }
             
-            # Add material to the Materials section if not already added
+            # Add material to the materials section if not already existing
             if layer_name not in unique_materials:
-                material_index = len(unique_materials) + 1
-                
                 # Create the Material element
-                material_element = ET.SubElement(
-                    materials_element,
-                    "Material",
-                    Name=material['Name'],
-                    Index=str(material_index),
-                    Type=material['Type'],
-                    Conductivity=material['Conductivity'],
-                    Tir="0.000000",
-                    EmissivityFront=material['Emissivity'],
-                    EmissivityBack=material['Emissivity'],
-                    RGBColor=material['Color']
-                )
-                
-                for side in ["Front", "Back"]:
-                    for range_type in ["Visible", "Solar"]:
-                        for specularity in ["Direct", "Diffuse"]:
-                            ET.SubElement(
-                                material_element,
-                                "Property",
-                                Side=side,
-                                Range=range_type,
-                                Specularity=specularity,
-                                T="0.000000",
-                                R="0.000000"
-                            )
-                
-                # Add Property elements for Front and Back sides
-                for side in ["Front", "Back"]:
-                    for range_type in ["Visible", "Solar"]:
-                        for specularity in ["Direct", "Diffuse"]:
-                            ET.SubElement(
-                                material_element,
-                                "Property",
-                                Side=side,
-                                Range=range_type,
-                                Specularity=specularity,
-                                T="0.000000",
-                                R="0.000000"
-                            )
-                
-                unique_materials[layer_name] = material_index
-        
-        # Add the polygon
-        polygon_element = ET.SubElement(
-            polygons_element,
-            "Polygon",
-            ID=str(i + 1),
-            Material=material['Name'],
-            NSides=str(len(polygon)),
-            Type="1",
-            units="mm"
-        )
-        
-        # Add each point to the polygon
-        for j, (x, y) in enumerate(polygon):
-            ET.SubElement(
-                polygon_element,
-                "Point",
-                index=str(j),
-                x=f"{x:.6f}",
-                y=f"{y:.6f}"
-            )
-        bc_id = i + 1
+                create_material(materials_element, material)
 
-    return root, bc_id
+                # Add to unique materials list so we don't add it twice
+                unique_materials.append(layer_name)
+        
+        create_polygon_element(polygons_element, material, polygon)
 
-def boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, bc_id):
+    return root
+
+def boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, glass_left, glass_right):
     boundary_conditions = [
         {
             "Name": "Adiabatic",
@@ -267,14 +274,6 @@ def boundary_xml_section(root, materials_element, polygons_element, boundarycond
             EmisModifier=condition["EmisModifier"]
         )
 
-    materials = []
-
-    for material in materials_element:
-        materials.append({
-            "Name": material.attrib.get("Name"),
-            "Emissivity": material.attrib.get("EmissivityFront")
-            })
-
     # Add BCPolygon for each polygon
     for polygon_element in polygons_element:
         # Extract the ID and MaterialName of each polygon from the XML
@@ -298,24 +297,20 @@ def boundary_xml_section(root, materials_element, polygons_element, boundarycond
         touching_edges = utils.find_touching_edges(polygons_element, polygon_id, polygon_points)
 
         #This is a debug function to see which edges are being marked as touching
-        #print(bc_id)
-        #print(polygon_id)
         #plot_polygon_debug(polygon_points, touching_edges)
 
-        bc_id = create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, bc_id, emissivity)
+        create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right)
 
         #Frame cavities need an extra boundary condition called Frame Cavity Surface 
         if "Frame Cavity NFRC 100" in material_name:
             polygon_points.reverse()
         
             touching_edges = utils.find_touching_edges(polygons_element, polygon_id, polygon_points)
-            bc_id = create_frame_cavity_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, bc_id, emissivity)
+            create_frame_cavity_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, emissivity, polygons_element)
 
     return root
 
-
-
-def create_frame_cavity_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, bc_id, emissivity):
+def create_frame_cavity_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, emissivity, polygons_element):
     for side in range(len(polygon_points)):  # Loop through each side of the polygon
         p1 = polygon_points[side]
         p2 = polygon_points[(side + 1) % len(polygon_points)]
@@ -332,13 +327,9 @@ def create_frame_cavity_boundary(polygon_points, materials_element, touching_edg
         else:
             emissivity = "0.9"
         
-        create_bc_polygon(boundaries_element, bc_id, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, "1")
-                
-        bc_id = bc_id + 1
+        create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, "1")
 
-    return bc_id
-
-def create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, bc_id, emissivity):
+def create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right):
     for side in range(len(polygon_points)):  # Loop through each side of the polygon
         p1 = polygon_points[side]
         p2 = polygon_points[(side + 1) % len(polygon_points)]
@@ -346,36 +337,40 @@ def create_solid_boundary(polygon_points, touching_edges, boundaries_element, po
 
         if not edge in touching_edges: #Boundaries for solid materials should only appear when edge it not touching another polygon
             # Check the boundary's orientation to determine if it's exterior or interior
-            if p1[0] > p2[0]:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
+            if p1[0] < glass_left or p2[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
                 bc_polygon_name = "NFRC 100-2010 Exterior"
                 ufactortag = "SHGC Exterior"
-            elif p1[0] < p2[0]:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
+            elif p1[0] > glass_right or p2[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
                 bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
                 ufactortag = "Frame"
             elif p1[1] == p2[1]:
                 bc_polygon_name = "Adiabatic"
                 ufactortag = ""
             else:  # Handle vertical boundaries (when x-coordinates are the same)
-                if p1[1] > p2[1]:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
+                if p1[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
                     bc_polygon_name = "NFRC 100-2010 Exterior"
                     ufactortag = "SHGC Exterior"
-                elif p1[1] < p2[1]:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
+                elif p1[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
                     bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
                     ufactortag = "Frame"
                 else:  # Handle the case where the points are exactly the same
                     bc_polygon_name = "Adiabatic"
                     ufactortag = ""
             #bc_polygon_name = "Adiabatic"
-            create_bc_polygon(boundaries_element, bc_id, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, ufactortag=ufactortag)
-            bc_id = bc_id + 1
+            create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, ufactortag=ufactortag)
 
-    return bc_id
-
-def create_bc_polygon(boundaries_element, bc_id, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, enclosure="0", ufactortag=""):
+def create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, enclosure="0", ufactortag=""):
+    if(len(boundaries_element) > 0):
+        last_id = int(boundaries_element[-1].attrib.get("ID"))
+    else:
+        #First boundary condition polygon ID should start after regular polygon IDs
+        last_id = int(polygons_element[-1].attrib.get("ID"))
+        
+    # Create the bondary condition polygon element
     bc_polygon = ET.SubElement(
         boundaries_element,
         "BCPolygon",
-        ID=str(bc_id),
+        ID=str(last_id + 1),
         BC=bc_polygon_name,
         units="mm",
         MaterialName=material_name,
@@ -396,123 +391,3 @@ def create_bc_polygon(boundaries_element, bc_id, bc_polygon_name, material_name,
             x=f"{x:.6f}",
             y=f"{y:.6f}"
         )
-
-def import_glass_from_mdb_to_xml(root, polygons_element, mdb_file_location, mdb_glzsys_name, materials_element):
-    # Step 1: Open the MDB file and access the "GlzSys" table to find the "GlzSys" ID.
-    conn_str = r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + mdb_file_location
-    conn = pyodbc.connect(conn_str)
-    cursor = conn.cursor()
-
-    # Search for the rectangle on the Glass1 layer
-    glass_layer = "Glass1"
-    bottom_left_corner = ""
-    for polygon_element in polygons_element:
-        material_name = polygon_element.attrib.get('Material')
-
-        if glass_layer.strip().lower() in material_name.strip().lower():
-            bottom_left_corner = (float(polygon_element.findall("Point")[0].attrib["x"]), 
-                                  float(polygon_element.findall("Point")[0].attrib["y"]))
-
-            for point_element in polygon_element.findall("Point"):
-                x = float(point_element.attrib["x"])
-                y = float(point_element.attrib["y"])
-                
-                if x < bottom_left_corner[0] and y < bottom_left_corner[1]:
-                    bottom_left_corner = (x, y)
-                        
-            polygons_element.remove(polygon_element)
-
-    # Query to get the GlzSys ID by Name
-    cursor.execute("SELECT ID FROM GlzSys WHERE Name = ?", (mdb_glzsys_name,))
-    glzsys_id = cursor.fetchone()
-
-    if not glzsys_id:
-        print(f"No GlzSys entry found with Name = {mdb_glzsys_name}")
-        return
-    glzsys_id = glzsys_id[0]
-
-    # Step 2: Retrieve child elements from the GlassList table
-    cursor.execute("SELECT ID FROM GlassList WHERE ParentID = ?", (glzsys_id,))
-    glass_childs_ids = cursor.fetchall()
-    
-    cursor.execute("SELECT ID FROM GapList WHERE ParentID = ?", (glzsys_id,))
-    gap_child_ids = cursor.fetchall()
-    gap_child_ids.insert(0, [0,])
-
-    # Step 4: For each child ID, find the corresponding rows in the "Glass" table and import them.
-    origin = bottom_left_corner
-    
-    for glass_count, child_id in enumerate(glass_childs_ids):
-        origin = insert_glass_polygon(cursor, gap_child_ids, glass_count, materials_element, polygons_element, child_id, origin)
-    
-    # Commit changes and close the connection
-    conn.close()
-    return root
-
-def insert_glass_polygon(cursor, gap_child_ids, glass_count, materials_element, polygons_element, child_id, origin):
-    child_id = child_id[0]
-    # Query to find the corresponding glass elements
-    cursor.execute("SELECT ID, Thickness FROM Glass WHERE ID = ?", (child_id,))
-    glass_row = cursor.fetchone()
-    
-    glass_id, thickness = glass_row
-    thickness = thickness*settings.scale_factor
-    print(origin)
-
-    # Step 5: Define the polygon (rectangle) based on the thickness
-
-    box_polygon = [origin, (origin[0]+thickness, origin[1]), (origin[0]+thickness, origin[1]+150), 
-                (origin[0], origin[1]+150)]
-
-    polygon = []
-    for point in box_polygon:
-        polygon.append((point[0] + gap_child_ids[glass_count][0]*settings.scale_factor, point[1]))
-
-    origin = polygon[-3]
-
-    material = {
-                'Name': "G1_Glass_" + str(glass_count),
-                'Conductivity': "1",
-                'Emissivity': "0.900000",
-                'Color': "0x00ffff",
-                'Type': "0"
-            }
-        
-    # Create the Material element
-    material_element = ET.SubElement(
-        materials_element,
-        "Material",
-        Name=material['Name'],
-        Index=str(100+glass_count),
-        Type=material['Type'],
-        Conductivity=material['Conductivity'],
-        Tir="0.000000",
-        EmissivityFront=material['Emissivity'],
-        EmissivityBack=material['Emissivity'],
-        RGBColor=material['Color']
-    )
-
-    polygon_element = ET.SubElement(
-        polygons_element,
-        "Polygon",
-        ID=str(glass_count + 200),
-        Material="G1_Glass_" + str(glass_count),
-        NSides=str(len(polygon)),
-        Type="1",
-        units="mm"
-    )
-    
-    # Add each point to the polygon
-    for j, (x, y) in enumerate(polygon):
-        ET.SubElement(
-            polygon_element,
-            "Point",
-            index=str(j),
-            x=f"{x:.6f}",
-            y=f"{y:.6f}"
-        )
-
-    polygon_element.set("id", str(glass_id))
-    polygon_element.set("thickness", str(thickness))
-
-    return origin

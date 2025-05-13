@@ -2,6 +2,8 @@ import math
 import numpy as np
 import matplotlib.pyplot as plt
 from difflib import get_close_matches
+from config import config, settings
+from utils import material_loader
 
 def is_counterclockwise(polygon_points):
     area = 0
@@ -96,7 +98,11 @@ def find_touching_edges(polygons_element, polygon_id, polygon_points):
                     touching_edges[(p1, p2)] = other_material_name  # Store touching material
     return touching_edges
 
-def find_closest_material(layer_name, materials):
+def find_closest_material(layer_name):
+    data = config.data
+    csv_file_path = data["materials_csv"]
+    materials = material_loader.from_csv(csv_file_path)
+    
     # Find the closest matching material name in the CSV file
     material_names = [material['Name'] for material in materials]
 
