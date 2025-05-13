@@ -14,9 +14,9 @@ def create_xml(polygons, output_file):
     # Create polygon, igu, and boundary elements
     polygon_xml_section(root, polygons, materials_element, polygons_element)
 
-    igu_importer.import_glass_from_mdb_to_xml(root, polygons_element, materials_element)
+    glass_left, glass_right = igu_importer.import_glass_from_mdb_to_xml(root, polygons_element, materials_element)
     
-    boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element)
+    boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, glass_left, glass_right)
 
     # Write the XML to a file
     tree = ET.ElementTree(root)
@@ -175,7 +175,7 @@ def polygon_xml_section(root, polygons, materials_element, polygons_element):
 
     return root
 
-def boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element):
+def boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, glass_left, glass_right):
     boundary_conditions = [
         {
             "Name": "Adiabatic",
@@ -299,7 +299,7 @@ def boundary_xml_section(root, materials_element, polygons_element, boundarycond
         #This is a debug function to see which edges are being marked as touching
         #plot_polygon_debug(polygon_points, touching_edges)
 
-        create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element)
+        create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right)
 
         #Frame cavities need an extra boundary condition called Frame Cavity Surface 
         if "Frame Cavity NFRC 100" in material_name:
@@ -329,7 +329,7 @@ def create_frame_cavity_boundary(polygon_points, materials_element, touching_edg
         
         create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, "1")
 
-def create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element):
+def create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right):
     for side in range(len(polygon_points)):  # Loop through each side of the polygon
         p1 = polygon_points[side]
         p2 = polygon_points[(side + 1) % len(polygon_points)]
@@ -337,20 +337,20 @@ def create_solid_boundary(polygon_points, touching_edges, boundaries_element, po
 
         if not edge in touching_edges: #Boundaries for solid materials should only appear when edge it not touching another polygon
             # Check the boundary's orientation to determine if it's exterior or interior
-            if p1[0] > p2[0]:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
+            if p1[0] < glass_left or p2[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
                 bc_polygon_name = "NFRC 100-2010 Exterior"
                 ufactortag = "SHGC Exterior"
-            elif p1[0] < p2[0]:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
+            elif p1[0] > glass_right or p2[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
                 bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
                 ufactortag = "Frame"
             elif p1[1] == p2[1]:
                 bc_polygon_name = "Adiabatic"
                 ufactortag = ""
             else:  # Handle vertical boundaries (when x-coordinates are the same)
-                if p1[1] > p2[1]:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
+                if p1[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
                     bc_polygon_name = "NFRC 100-2010 Exterior"
                     ufactortag = "SHGC Exterior"
-                elif p1[1] < p2[1]:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
+                elif p1[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
                     bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
                     ufactortag = "Frame"
                 else:  # Handle the case where the points are exactly the same

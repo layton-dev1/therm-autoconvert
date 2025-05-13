@@ -29,6 +29,8 @@ def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
                         
             polygons_element.remove(polygon_element)
 
+    glass_left = bottom_left_corner[0]
+
     igu = {
         "glass": [],
         "gap": []
@@ -121,11 +123,11 @@ def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
             "keff": keff,
         })
     
-    insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner)
+    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner)
     
     # Commit changes and close the connection
     conn.close()
-    return int(polygons_element[-1].attrib.get("ID"))
+    return glass_left, glass_right[0]
 
 def insert_glass_polygon(igu, materials_element, polygons_element, origin):
     # Loop through glass
