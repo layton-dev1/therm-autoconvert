@@ -3,6 +3,7 @@ from datetime import datetime
 from utils import utils
 import pyodbc
 from config import settings
+from xml_writer import igu_importer
 
 def create_xml(polygons, materials, output_file):
     # Create the root element
@@ -35,12 +36,14 @@ def create_xml(polygons, materials, output_file):
     polygons_element = ET.SubElement(root, "Polygons")
     boundaries_element = ET.SubElement(root, "Boundaries")
     
-    root, bc_id = polygon_xml_section(root, polygons, materials, materials_element, polygons_element)
     
-    mdb_file_location = r"C:\Users\tyler.henderson\Documents\DXFtoTHERM\Glazing\DB.mdb"
-    mdb_glzsys_name = "G1"
+    mdb_file_location = r"C:\Users\tyler.henderson\Documents\DXFtoTHERM\therm-autoconvert\lib\data\therm-autoconvert - DB.mdb"
+    mdb_glzsys_id = 2
+    
+    root, bc_id = polygon_xml_section(root, polygons, materials, materials_element, polygons_element)
 
-    #root = import_glass_from_mdb_to_xml(root, polygons_element, mdb_file_location, mdb_glzsys_name, materials_element)
+    bc_id = igu_importer.import_glass_from_mdb_to_xml(root, polygons_element, mdb_file_location, mdb_glzsys_id, materials_element)
+    
     
     root = boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, bc_id + 1)
 
@@ -396,123 +399,3 @@ def create_bc_polygon(boundaries_element, bc_id, bc_polygon_name, material_name,
             x=f"{x:.6f}",
             y=f"{y:.6f}"
         )
-
-def import_glass_from_mdb_to_xml(root, polygons_element, mdb_file_location, mdb_glzsys_name, materials_element):
-    # Step 1: Open the MDB file and access the "GlzSys" table to find the "GlzSys" ID.
-    conn_str = r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + mdb_file_location
-    conn = pyodbc.connect(conn_str)
-    cursor = conn.cursor()
-
-    # Search for the rectangle on the Glass1 layer
-    glass_layer = "Glass1"
-    bottom_left_corner = ""
-    for polygon_element in polygons_element:
-        material_name = polygon_element.attrib.get('Material')
-
-        if glass_layer.strip().lower() in material_name.strip().lower():
-            bottom_left_corner = (float(polygon_element.findall("Point")[0].attrib["x"]), 
-                                  float(polygon_element.findall("Point")[0].attrib["y"]))
-
-            for point_element in polygon_element.findall("Point"):
-                x = float(point_element.attrib["x"])
-                y = float(point_element.attrib["y"])
-                
-                if x < bottom_left_corner[0] and y < bottom_left_corner[1]:
-                    bottom_left_corner = (x, y)
-                        
-            polygons_element.remove(polygon_element)
-
-    # Query to get the GlzSys ID by Name
-    cursor.execute("SELECT ID FROM GlzSys WHERE Name = ?", (mdb_glzsys_name,))
-    glzsys_id = cursor.fetchone()
-
-    if not glzsys_id:
-        print(f"No GlzSys entry found with Name = {mdb_glzsys_name}")
-        return
-    glzsys_id = glzsys_id[0]
-
-    # Step 2: Retrieve child elements from the GlassList table
-    cursor.execute("SELECT ID FROM GlassList WHERE ParentID = ?", (glzsys_id,))
-    glass_childs_ids = cursor.fetchall()
-    
-    cursor.execute("SELECT ID FROM GapList WHERE ParentID = ?", (glzsys_id,))
-    gap_child_ids = cursor.fetchall()
-    gap_child_ids.insert(0, [0,])
-
-    # Step 4: For each child ID, find the corresponding rows in the "Glass" table and import them.
-    origin = bottom_left_corner
-    
-    for glass_count, child_id in enumerate(glass_childs_ids):
-        origin = insert_glass_polygon(cursor, gap_child_ids, glass_count, materials_element, polygons_element, child_id, origin)
-    
-    # Commit changes and close the connection
-    conn.close()
-    return root
-
-def insert_glass_polygon(cursor, gap_child_ids, glass_count, materials_element, polygons_element, child_id, origin):
-    child_id = child_id[0]
-    # Query to find the corresponding glass elements
-    cursor.execute("SELECT ID, Thickness FROM Glass WHERE ID = ?", (child_id,))
-    glass_row = cursor.fetchone()
-    
-    glass_id, thickness = glass_row
-    thickness = thickness*settings.scale_factor
-    print(origin)
-
-    # Step 5: Define the polygon (rectangle) based on the thickness
-
-    box_polygon = [origin, (origin[0]+thickness, origin[1]), (origin[0]+thickness, origin[1]+150), 
-                (origin[0], origin[1]+150)]
-
-    polygon = []
-    for point in box_polygon:
-        polygon.append((point[0] + gap_child_ids[glass_count][0]*settings.scale_factor, point[1]))
-
-    origin = polygon[-3]
-
-    material = {
-                'Name': "G1_Glass_" + str(glass_count),
-                'Conductivity': "1",
-                'Emissivity': "0.900000",
-                'Color': "0x00ffff",
-                'Type': "0"
-            }
-        
-    # Create the Material element
-    material_element = ET.SubElement(
-        materials_element,
-        "Material",
-        Name=material['Name'],
-        Index=str(100+glass_count),
-        Type=material['Type'],
-        Conductivity=material['Conductivity'],
-        Tir="0.000000",
-        EmissivityFront=material['Emissivity'],
-        EmissivityBack=material['Emissivity'],
-        RGBColor=material['Color']
-    )
-
-    polygon_element = ET.SubElement(
-        polygons_element,
-        "Polygon",
-        ID=str(glass_count + 200),
-        Material="G1_Glass_" + str(glass_count),
-        NSides=str(len(polygon)),
-        Type="1",
-        units="mm"
-    )
-    
-    # Add each point to the polygon
-    for j, (x, y) in enumerate(polygon):
-        ET.SubElement(
-            polygon_element,
-            "Point",
-            index=str(j),
-            x=f"{x:.6f}",
-            y=f"{y:.6f}"
-        )
-
-    polygon_element.set("id", str(glass_id))
-    polygon_element.set("thickness", str(thickness))
-
-    return origin
