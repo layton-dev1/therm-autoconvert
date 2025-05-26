@@ -2,6 +2,7 @@ from dxf_reader import reader
 from xml_writer import writer
 from config import config
 from polygon_parser import parser
+from components import thmx_reader
 
 def main():
     # Path to your DXF file

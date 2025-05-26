@@ -1,6 +1,7 @@
 import pyodbc
 from config import config
 import xml.etree.ElementTree as ET
+from components import thmx_reader
 
 def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
     mdb_file_location = r"C:\Users\tyler.henderson\Documents\DXFtoTHERM\therm-autoconvert\lib\data\therm-autoconvert - DB.mdb"
@@ -126,7 +127,7 @@ def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
             "keff": keff,
         })
     
-    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner, 12.7)
+    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner, 9.7)
     
     # Commit changes and close the connection
     conn.close()
@@ -147,6 +148,7 @@ def insert_glass_polygon(igu, materials_element, polygons_element, origin, space
             gap_polygon = [(origin[0], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+150), 
                 (origin[0], origin[1]+150)]
             create_gap_element(materials_element, polygons_element, gap_polygon, gap, i)
+            thmx_reader.create_spacer(materials_element, polygons_element, origin, gap["thickness"])
             origin = (origin[0]+gap["thickness"], origin[1])
 
     return origin
