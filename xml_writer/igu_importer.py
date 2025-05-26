@@ -1,10 +1,12 @@
 import pyodbc
-from config import settings
+from config import config
 import xml.etree.ElementTree as ET
 
 def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
     mdb_file_location = r"C:\Users\tyler.henderson\Documents\DXFtoTHERM\therm-autoconvert\lib\data\therm-autoconvert - DB.mdb"
     mdb_glzsys_id = 2
+    spacer_file = config.data["spacer_file_path"]
+    
     # Step 1: Open the MDB file and access the "GlzSys" table to find the "GlzSys" ID.
     conn_str = r'DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=' + mdb_file_location
     conn = pyodbc.connect(conn_str)
@@ -77,11 +79,12 @@ def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
         emis2 = row.emis2
         conductivity = row.Conductivity
         
+        # TODO make rounding according to ini file?
         igu["glass"].append({
             "id": glass_id,
             "name": glass_name,
             "index": glasslist_index,
-            "thickness": glass_thickness,
+            "thickness": round(glass_thickness, 0),
             "emis1": emis1,
             "emis2": emis2,
             "conductivity": conductivity,
@@ -123,13 +126,13 @@ def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
             "keff": keff,
         })
     
-    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner)
+    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner, 12.7)
     
     # Commit changes and close the connection
     conn.close()
     return glass_left, glass_right[0]
 
-def insert_glass_polygon(igu, materials_element, polygons_element, origin):
+def insert_glass_polygon(igu, materials_element, polygons_element, origin, spacer_height):
     # Loop through glass
     polygon = []
     for i, glass in enumerate(igu["glass"]):
@@ -141,7 +144,7 @@ def insert_glass_polygon(igu, materials_element, polygons_element, origin):
         create_glass_element(materials_element, polygons_element, glass_polygon, glass, i)
         if not i == len(igu["glass"]) - 1:
             gap = igu["gap"][i]
-            gap_polygon = [origin, (origin[0]+gap["thickness"], origin[1]), (origin[0]+gap["thickness"], origin[1]+150), 
+            gap_polygon = [(origin[0], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+150), 
                 (origin[0], origin[1]+150)]
             create_gap_element(materials_element, polygons_element, gap_polygon, gap, i)
             origin = (origin[0]+gap["thickness"], origin[1])

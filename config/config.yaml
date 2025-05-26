@@ -8,5 +8,6 @@ data:
   materials_csv: "lib/data/NFRC101E0A15.csv"
   output_file_path: "lib/output/"
   input_file_path: "lib/dxfs/"
+  spacer_file_path: "lib/data/Chromatech Ultra S.thmx"
   dxfs:
     - "Jamb_SI"
