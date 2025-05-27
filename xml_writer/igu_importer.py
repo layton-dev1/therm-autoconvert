@@ -126,27 +126,49 @@ def import_glass_from_mdb_to_xml(root, polygons_element, materials_element):
             "thickness": gap_thickness,
             "keff": keff,
         })
+        
+    highest_point_y = float('-inf')
+    for polygon in polygons_element:
+        for point in polygon.findall("Point"):
+            y_value = float(point.attrib["y"])
+            if(y_value>highest_point_y):
+                highest_point_y = y_value
     
-    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner, 9.7)
+    glass_right = insert_glass_polygon(igu, materials_element, polygons_element, bottom_left_corner, 9.7, float(highest_point_y))
     
     # Commit changes and close the connection
     conn.close()
     return glass_left, glass_right[0]
 
-def insert_glass_polygon(igu, materials_element, polygons_element, origin, spacer_height):
+def insert_glass_polygon(igu, materials_element, polygons_element, origin, spacer_height, highest_point_y):
     # Loop through glass
     polygon = []
+    if(spacer_height + origin[1] > highest_point_y):
+        print("Spacer is taller than the highest point")
+        highest_point_y = spacer_height + origin[1]
+    igu_height = (highest_point_y-origin[1])+150
+    edge_height = (highest_point_y-origin[1])+63.5
+    
+    print(f"Highest Point: {highest_point_y}")
+    print(f"IGU Height: {igu_height}")
+    print(f"Edge Height: {edge_height}")
+    print(f"Origin: {origin[0]}, {origin[1]}")
+    
     for i, glass in enumerate(igu["glass"]):
         # Create a rectangle for class starting at origin
-        glass_polygon = [origin, (origin[0]+glass["thickness"], origin[1]), (origin[0]+glass["thickness"], origin[1]+150), 
-                (origin[0], origin[1]+150)]
+        glass_polygon = [origin, (origin[0]+glass["thickness"], origin[1]), (origin[0]+glass["thickness"], origin[1]+igu_height), 
+                (origin[0], origin[1]+igu_height)]
+        
+        if(i==len(igu["glass"])-1):
+            glass_polygon.insert(2, (origin[0]+glass["thickness"], origin[1]+edge_height))
+            
         origin = (origin[0]+glass["thickness"], origin[1])
 
         create_glass_element(materials_element, polygons_element, glass_polygon, glass, i)
         if not i == len(igu["glass"]) - 1:
             gap = igu["gap"][i]
-            gap_polygon = [(origin[0], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+150), 
-                (origin[0], origin[1]+150)]
+            gap_polygon = [(origin[0], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+spacer_height), (origin[0]+gap["thickness"], origin[1]+igu_height), 
+                (origin[0], origin[1]+igu_height)]
             create_gap_element(materials_element, polygons_element, gap_polygon, gap, i)
             thmx_reader.create_spacer(materials_element, polygons_element, origin, gap["thickness"])
             origin = (origin[0]+gap["thickness"], origin[1])

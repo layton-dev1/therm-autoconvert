@@ -2,6 +2,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from utils import utils
 from xml_writer import igu_importer
+import numpy as np
 
 def create_xml(polygons, output_file):
     # Create the root element
@@ -16,11 +17,59 @@ def create_xml(polygons, output_file):
 
     glass_left, glass_right = igu_importer.import_glass_from_mdb_to_xml(root, polygons_element, materials_element)
     
+    parse(polygons_element)
+    
     boundary_xml_section(root, materials_element, polygons_element, boundaryconditions_element, boundaries_element, glass_left, glass_right)
 
     # Write the XML to a file
     tree = ET.ElementTree(root)
     tree.write(output_file, encoding="utf-8", xml_declaration=True)
+
+def parse(polygons_element, tolerance=1e-2):
+    new_polygons = [polygon for polygon in polygons_element]  # Deep copy to avoid modifying input
+
+    for poly_idx, polygon in enumerate(polygons_element):
+        for point in polygon.findall("Point"):
+            for other_idx, other_polygon in enumerate(polygons_element):
+                if poly_idx == other_idx:
+                    continue  # Don't check against itself
+
+                for edge_idx in range(len(other_polygon.findall("Point"))):  # Only iterate over the coordinates
+                    edge_start = (float(other_polygon.findall("Point")[edge_idx].attrib["x"]), float(other_polygon.findall("Point")[edge_idx].attrib["y"]))
+                    edge_end = (float(other_polygon.findall("Point")[(edge_idx + 1) % len(other_polygon.findall("Point"))].attrib["x"]), \
+                        float(other_polygon.findall("Point")[(edge_idx + 1) % len(other_polygon.findall("Point"))].attrib["y"]))
+
+                    vertex = (float(point.attrib["x"]), float(point.attrib["y"]))
+                    if point_on_segment(vertex, edge_start, edge_end, tolerance):
+                        # Insert the vertex if it isn't already present
+                        if not np.allclose(vertex, edge_start, atol=tolerance) and \
+                           not np.allclose(vertex, edge_end, atol=tolerance):
+                            new_point = ET.Element("Point")
+                            new_point.set("x", f"{vertex[0]:.6f}")
+                            new_point.set("y", f"{vertex[1]:.6f}")
+                            new_point.set("index", str(edge_idx + 1))
+                            new_polygons[other_idx].insert(edge_idx + 1, new_point)
+
+def point_on_segment(point, seg_start, seg_end, tolerance=1e-1):
+    """
+    Checks if a point lies on a line segment within a given tolerance.
+    """
+    p = np.array(point, dtype=float)
+    a = np.array(seg_start, dtype=float)
+    b = np.array(seg_end, dtype=float)
+    
+    # Vector cross-product should be near zero (collinear)
+    cross_product = np.cross(b - a, p - a)
+    if abs(cross_product) > tolerance:
+        return False
+
+    # Check if the point is within segment bounds
+    dot_product = np.dot(p - a, b - a)
+    if dot_product < 0 or dot_product > np.dot(b - a, b - a):
+        return False
+    
+    return True
+
 
 def create_headings():
     root = ET.Element("THERM-XML", xmlns="http://windows.lbl.gov")
@@ -248,7 +297,43 @@ def boundary_xml_section(root, materials_element, polygons_element, boundarycond
             "RadiationFlag": "0",
             "ConstantTemperatureFlag": "0",
             "EmisModifier": "1.000000"
-        }
+        },
+        {
+        "Name": "Glazing Cavity Surface",
+        "Type": "6",
+        "H": "0.000000",
+        "HeatFLux": "0.000000",
+        "Temperature": "0.000000",
+        "RGBColor": "0xFF0000",
+        "Tr": "0.000000",
+        "Hr": "0.000000",
+        "Ei": "1.000000",
+        "Viewfactor": "1.000000",
+        "RadiationModel": "0",
+        "ConvectionFlag": "0",
+        "FluxFlag": "0",
+        "RadiationFlag": "0",
+        "ConstantTemperatureFlag": "0",
+        "EmisModifier": "1.000000"
+    },
+    {
+        "Name": "Jamb_SI:G1 - TG w LowE (ID:2) U-factor Inside Film",
+        "Type": "1",
+        "H": "2.262046",
+        "HeatFLux": "0.000000",
+        "Temperature": "21.000000",
+        "RGBColor": "0xFF0000",
+        "Tr": "21.000000",
+        "Hr": "4.704774",
+        "Ei": "1.000000",
+        "Viewfactor": "1.000000",
+        "RadiationModel": "3",
+        "ConvectionFlag": "1",
+        "FluxFlag": "0",
+        "RadiationFlag": "1",
+        "ConstantTemperatureFlag": "0",
+        "EmisModifier": "1.000000"
+    }
     ]
     
     # Add each boundary condition to the XML
@@ -298,8 +383,12 @@ def boundary_xml_section(root, materials_element, polygons_element, boundarycond
 
         #This is a debug function to see which edges are being marked as touching
         #plot_polygon_debug(polygon_points, touching_edges)
-
-        create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right)
+        if "Glass_2" in material_name:
+            create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right, "gin")
+        elif "Glass_0" in material_name:
+            create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right, "gout")
+        else:
+            create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right)
 
         #Frame cavities need an extra boundary condition called Frame Cavity Surface 
         if "Frame Cavity NFRC 100" in material_name:
@@ -307,8 +396,31 @@ def boundary_xml_section(root, materials_element, polygons_element, boundarycond
         
             touching_edges = utils.find_touching_edges(polygons_element, polygon_id, polygon_points)
             create_frame_cavity_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, emissivity, polygons_element)
+            
+        if "Gap" in material_name:
+            touching_edges = utils.find_touching_edges(polygons_element, polygon_id, polygon_points)
+            create_glazing_gap_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, emissivity, polygons_element)
 
     return root
+
+def create_glazing_gap_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, emissivity, polygons_element):
+    for side in range(len(polygon_points)):  # Loop through each side of the polygon
+        p1 = polygon_points[side]
+        p2 = polygon_points[(side + 1) % len(polygon_points)]
+        edge = (p1, p2)
+
+        bc_polygon_name = "Glazing Cavity Surface"
+        material_name = ""
+
+        if edge in touching_edges:  # If the edge is touching another polygon, the material name should be set to that adjacent polygon's material
+            material_name = touching_edges[edge]
+            for material in materials_element:
+                if material.attrib.get("Name") == material_name:
+                    emissivity = material.attrib.get("EmissivityFront")
+        else:
+            emissivity = "0.84"
+        
+        create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, "1")
 
 def create_frame_cavity_boundary(polygon_points, materials_element, touching_edges, boundaries_element, polygon_id, emissivity, polygons_element):
     for side in range(len(polygon_points)):  # Loop through each side of the polygon
@@ -329,7 +441,7 @@ def create_frame_cavity_boundary(polygon_points, materials_element, touching_edg
         
         create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, "1")
 
-def create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right):
+def create_solid_boundary(polygon_points, touching_edges, boundaries_element, polygon_id, material_name, emissivity, polygons_element, glass_left, glass_right, g=""):
     for side in range(len(polygon_points)):  # Loop through each side of the polygon
         p1 = polygon_points[side]
         p2 = polygon_points[(side + 1) % len(polygon_points)]
@@ -337,25 +449,40 @@ def create_solid_boundary(polygon_points, touching_edges, boundaries_element, po
 
         if not edge in touching_edges: #Boundaries for solid materials should only appear when edge it not touching another polygon
             # Check the boundary's orientation to determine if it's exterior or interior
-            if p1[0] < glass_left or p2[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
-                bc_polygon_name = "NFRC 100-2010 Exterior"
-                ufactortag = "SHGC Exterior"
-            elif p1[0] > glass_right or p2[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
-                bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
-                ufactortag = "Frame"
-            elif p1[1] == p2[1]:
-                bc_polygon_name = "Adiabatic"
-                ufactortag = ""
-            else:  # Handle vertical boundaries (when x-coordinates are the same)
-                if p1[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
-                    bc_polygon_name = "NFRC 100-2010 Exterior"
-                    ufactortag = "SHGC Exterior"
-                elif p1[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
-                    bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
-                    ufactortag = "Frame"
-                else:  # Handle the case where the points are exactly the same
+            if g == "gout":
+                if p1[1] == p2[1]:
                     bc_polygon_name = "Adiabatic"
                     ufactortag = ""
+                else:
+                    bc_polygon_name = "NFRC 100-2010 Exterior"
+                    ufactortag = "None"
+            elif g == "gin":
+                if p1[1] == p2[1]:
+                    bc_polygon_name = "Adiabatic"
+                    ufactortag = ""
+                else:
+                    bc_polygon_name = "Jamb_SI:G1 - TG w LowE (ID:2) U-factor Inside Film"
+                    ufactortag = "Edge"
+            else:
+                if p1[0] < glass_left or p2[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
+                    bc_polygon_name = "NFRC 100-2010 Exterior"
+                    ufactortag = "SHGC Exterior"
+                elif p1[0] > glass_right or p2[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
+                    bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
+                    ufactortag = "Frame"
+                elif p1[1] == p2[1]:
+                    bc_polygon_name = "Adiabatic"
+                    ufactortag = ""
+                else:  # Handle vertical boundaries (when x-coordinates are the same)
+                    if p1[0] < glass_left:  # If the y-coordinate of p1 is less than p2, it's facing the exterior (upward)
+                        bc_polygon_name = "NFRC 100-2010 Exterior"
+                        ufactortag = "SHGC Exterior"
+                    elif p1[0] > glass_right:  # If the y-coordinate of p1 is greater than p2, it's facing the interior (downward)
+                        bc_polygon_name = "Interior Thermally Broken Frame (convection only)"
+                        ufactortag = "Frame"
+                    else:  # Handle the case where the points are exactly the same
+                        bc_polygon_name = "Adiabatic"
+                        ufactortag = ""
             #bc_polygon_name = "Adiabatic"
             create_bc_polygon(boundaries_element, bc_polygon_name, material_name, polygon_id, p1, p2, emissivity, polygons_element, ufactortag=ufactortag)
 

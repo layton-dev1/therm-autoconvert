@@ -2,57 +2,46 @@ import xml.etree.ElementTree as ET
 from config import config
 
 def create_spacer(materials_element, polygons_element, origin, desired_size=12.7):
-    file_path = config.data["spacer_file_path"] 
+    file_path = config.data["spacer_file_path"]
     tree = ET.parse(file_path)
     root = tree.getroot()
     
-    xmlns={"therm": "http://windows.lbl.gov"}
-    
+    xmlns = {"therm": "http://windows.lbl.gov"}
     polygons = root.findall(".//therm:Polygon", xmlns)
-    
+
+    # Determine original bounding box
     min_x = float('inf')
     min_y = float('inf')
     max_x = float('-inf')
-    bottom_left_corner = (0, 0)
-    
+
     for poly in polygons:
-        points = poly.findall(".//therm:Point", xmlns)
-        for point in points:
+        for point in poly.findall(".//therm:Point", xmlns):
             x = float(point.attrib["x"])
             y = float(point.attrib["y"])
-            if (y < min_y) or (y == min_y and x < min_x):
-                min_x = x
-                min_y = y
-                bottom_left_corner = [x, y]
-            elif x > max_x:
-                max_x = x
-    
-    print(f"min x: {min_x}, min y: {min_y}")
-    print(f"blc: {bottom_left_corner[0]}, {bottom_left_corner[1]}")
-    print(f"origin x: {origin[0]} origin y: {origin[1]}")
-    spacer_size = max_x-min_x
-    scale = spacer_size/12.7
-    desired_size = desired_size*scale
-    to_add = desired_size-spacer_size
-    halfway_point = min_x + spacer_size/2
-    
-    diff_from_origin = (float(bottom_left_corner[0])-origin[0], float(bottom_left_corner[1])-origin[1])
-    
-    print(f"Diff: {diff_from_origin}")
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+
+    original_width = max_x - min_x
+
+    # Compute X scale only
+    scale_x = desired_size / original_width
+    x0, y0 = origin
+    translate_x = x0 - min_x * scale_x
+    translate_y = y0 - min_y  # no y-scale
+
+    # Apply X-scale and full translation to each point
     for poly in polygons:
-        points = poly.findall(".//therm:Point", xmlns)
-        for point in points:
-            x_value = float(point.attrib["x"])
-            if(x_value > halfway_point):
-                point.attrib["x"] = str(x_value + to_add)
-                
-    for poly in polygons:
-        points = poly.findall(".//therm:Point", xmlns)
         polygon = []
-        for point in points:
-            point.attrib["x"] = str(float(point.attrib["x"])-diff_from_origin[0])
-            point.attrib["y"] = str(float(point.attrib["y"])-diff_from_origin[1])
-            polygon.append((point.attrib["x"], point.attrib["y"]))
+        for point in poly.findall(".//therm:Point", xmlns):
+            x = float(point.attrib["x"])
+            y = float(point.attrib["y"])
+            new_x = round(x * scale_x + translate_x, 6)
+            new_y = round(y + translate_y, 6)  # Y is just translated
+            point.attrib["x"] = str(new_x)
+            point.attrib["y"] = str(new_y)
+            polygon.append((str(new_x), str(new_y)))
+
         material = get_material_properties_by_name(root, poly.attrib["Material"], xmlns)
         create_spacer_element(materials_element, polygons_element, polygon, material)
     
